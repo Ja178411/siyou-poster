@@ -90,32 +90,43 @@ def wait_container(client: httpx.Client, cid: str, timeout: int = 300) -> None:
     raise TimeoutError(f"Container {cid} did not finish in {timeout}s")
 
 
-def post_video_ig(client: httpx.Client, target: dict, caption: str) -> str:
-    log(f"Creating IG REELS container for {target['video_url']}")
-    r = client.post(
-        f"{GRAPH}/{IG_USER}/media",
-        data={
-            "media_type": "REELS",
-            "video_url": target["video_url"],
-            "caption": caption,
-            "share_to_feed": "true",
-            "access_token": META_TOKEN,
-        },
-        timeout=120,
-    )
-    r.raise_for_status()
-    cid = r.json()["id"]
-    log(f"  container_id={cid}, polling...")
-    wait_container(client, cid, timeout=300)
-    pub = client.post(
-        f"{GRAPH}/{IG_USER}/media_publish",
-        data={"creation_id": cid, "access_token": META_TOKEN},
-        timeout=60,
-    )
-    pub.raise_for_status()
-    media_id = pub.json()["id"]
-    log(f"  IG published: {media_id}")
-    return media_id
+def post_video_ig(client: httpx.Client, target: dict, caption: str, max_attempts: int = 2) -> str:
+    last_err: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        log(f"Creating IG REELS container (attempt {attempt}/{max_attempts}) for {target['video_url']}")
+        r = client.post(
+            f"{GRAPH}/{IG_USER}/media",
+            data={
+                "media_type": "REELS",
+                "video_url": target["video_url"],
+                "caption": caption,
+                "share_to_feed": "true",
+                "access_token": META_TOKEN,
+            },
+            timeout=120,
+        )
+        r.raise_for_status()
+        cid = r.json()["id"]
+        log(f"  container_id={cid}, polling...")
+        try:
+            wait_container(client, cid, timeout=300)
+        except RuntimeError as e:
+            log(f"  attempt {attempt} failed: {e}")
+            last_err = e
+            if attempt < max_attempts:
+                time.sleep(15)
+                continue
+            raise
+        pub = client.post(
+            f"{GRAPH}/{IG_USER}/media_publish",
+            data={"creation_id": cid, "access_token": META_TOKEN},
+            timeout=60,
+        )
+        pub.raise_for_status()
+        media_id = pub.json()["id"]
+        log(f"  IG published: {media_id}")
+        return media_id
+    raise RuntimeError(f"All {max_attempts} attempts failed: {last_err}")
 
 
 def post_carousel_ig(client: httpx.Client, target: dict, caption: str) -> str:
