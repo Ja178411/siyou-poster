@@ -1,0 +1,51 @@
+name: SIYOU Daily Post
+
+on:
+  schedule:
+    - cron: '0 23 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (skip actual posts)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install httpx
+
+      - name: Run poster
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN_INPUT" = "true" ]; then
+            export DRY_RUN=1
+          fi
+          python post.py
+
+      - name: Commit posted.json update
+        if: success()
+        run: |
+          if git diff --quiet posted.json; then
+            echo "No changes to posted.json"
+            exit 0
+          fi
+          git config user.name "siyou-poster-bot"
+          git config user.email "siyou-poster-bot@users.noreply.github.com"
+          git add posted.json
+          MSG=$(jq -r '.posted[0] | "post: Batch \(.batch) (\(.code)) variant \(.variant)"' posted.json)
+          git commit -m "$MSG"
+          git push
