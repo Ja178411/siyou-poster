@@ -1,13 +1,26 @@
 {
   "posted": [
     {
+      "batch": "107",
+      "code": "C444",
+      "ig_media_id": "18079839005408468",
+      "fb_video_id": "1001593489107886",
+      "posted_at": "2026-04-30T19:24:36.290845+00:00",
+      "variant": "B",
+      "products_tagged": [
+        "35827976886800693"
+      ]
+    },
+    {
       "batch": "108",
       "code": "D370",
       "ig_media_id": "17988326909993568",
       "fb_video_id": "1548412353573025",
       "posted_at": "2026-04-30T18:00:00Z",
       "variant": "A",
-      "products_tagged": ["26856641243931186"]
+      "products_tagged": [
+        "26856641243931186"
+      ]
     },
     {
       "batch": "109",
@@ -20,6 +33,6 @@
       "note": "Posted via app before automation; no FB post"
     }
   ],
-  "last_variant": "A",
+  "last_variant": "B",
   "skipped": []
 }
