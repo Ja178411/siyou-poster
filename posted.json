@@ -1,0 +1,25 @@
+{
+  "posted": [
+    {
+      "batch": "108",
+      "code": "D370",
+      "ig_media_id": "17988326909993568",
+      "fb_video_id": "1548412353573025",
+      "posted_at": "2026-04-30T18:00:00Z",
+      "variant": "A",
+      "products_tagged": ["26856641243931186"]
+    },
+    {
+      "batch": "109",
+      "code": "C445",
+      "ig_media_id": null,
+      "fb_video_id": null,
+      "posted_at": "2026-04-29T16:39:13Z",
+      "variant": "B",
+      "products_tagged": [],
+      "note": "Posted via app before automation; no FB post"
+    }
+  ],
+  "last_variant": "A",
+  "skipped": []
+}
