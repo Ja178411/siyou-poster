@@ -1,6 +1,17 @@
 {
   "posted": [
     {
+      "batch": "105",
+      "code": "MJS-03037",
+      "ig_media_id": "18096724940037538",
+      "fb_video_id": "27262185386700555",
+      "posted_at": "2026-05-01T19:09:58.809813+00:00",
+      "variant": "C",
+      "products_tagged": [
+        "26655548304066865"
+      ]
+    },
+    {
       "batch": "107",
       "code": "C444",
       "ig_media_id": "18079839005408468",
@@ -33,6 +44,6 @@
       "note": "Posted via app before automation; no FB post"
     }
   ],
-  "last_variant": "B",
+  "last_variant": "C",
   "skipped": []
 }
