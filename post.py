@@ -54,10 +54,17 @@ def is_already_posted(batch: dict, recent_captions: list[str], posted_state: dic
     return False
 
 
+def has_caption(batch: dict) -> bool:
+    caps = batch.get("captions") or {}
+    return any((caps.get(v) or "").strip() for v in ("A", "B", "C"))
+
+
 def pick_next(briefs: dict, posted_state: dict, recent_captions: list[str]) -> dict | None:
     candidates = [
         b for b in briefs["batches"]
-        if b.get("taggable") and not is_already_posted(b, recent_captions, posted_state)
+        if b.get("taggable")
+        and has_caption(b)
+        and not is_already_posted(b, recent_captions, posted_state)
     ]
     candidates.sort(key=lambda b: int(b["batch"]), reverse=True)
     return candidates[0] if candidates else None
