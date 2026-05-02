@@ -1,6 +1,17 @@
 {
   "posted": [
     {
+      "batch": "102",
+      "code": "D320",
+      "ig_media_id": "17950363910983667",
+      "fb_video_id": "2333908250469965",
+      "posted_at": "2026-05-02T23:37:08.458692+00:00",
+      "variant": "B",
+      "products_tagged": [
+        "26113007281710698"
+      ]
+    },
+    {
       "batch": "103",
       "code": "D388",
       "ig_media_id": "18591455131046859",
@@ -55,6 +66,6 @@
       "note": "Posted via app before automation; no FB post"
     }
   ],
-  "last_variant": "A",
+  "last_variant": "B",
   "skipped": []
 }
