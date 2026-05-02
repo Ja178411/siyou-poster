@@ -4,7 +4,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -86,38 +88,103 @@ def page_token(client: httpx.Client) -> str:
 def wait_container(client: httpx.Client, cid: str, timeout: int = 300) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        r = client.get(f"{GRAPH}/{cid}", params={"access_token": META_TOKEN, "fields": "status_code"}, timeout=30)
-        code = r.json().get("status_code")
+        r = client.get(
+            f"{GRAPH}/{cid}",
+            params={"access_token": META_TOKEN, "fields": "status_code,status"},
+            timeout=30,
+        )
+        body = r.json()
+        code = body.get("status_code")
         log(f"  container {cid} status: {code}")
         if code == "FINISHED":
             return
         if code in ("ERROR", "EXPIRED"):
-            raise RuntimeError(f"Container {cid} failed: {r.json()}")
+            raise RuntimeError(f"Container {cid} failed: {body}")
         time.sleep(5)
     raise TimeoutError(f"Container {cid} did not finish in {timeout}s")
 
 
-def post_video_ig(client: httpx.Client, target: dict, caption: str, max_attempts: int = 2) -> str:
+def prepare_reel(client: httpx.Client, video_url: str) -> Path:
+    """Download the source video and re-encode it to Meta Reels-compliant specs.
+
+    Why: Meta rejects MP4s without faststart (moov before mdat) and recommends
+    video bitrate <=5 Mbps with AAC 128 kbps / 48 kHz. Source videos in R2 fail
+    both, so we transcode in CI before uploading.
+    """
+    src = Path(tempfile.mkstemp(suffix=".mp4", prefix="reel_src_")[1])
+    log(f"Downloading {video_url}")
+    with client.stream("GET", video_url, timeout=120, follow_redirects=True) as r:
+        r.raise_for_status()
+        with src.open("wb") as f:
+            for chunk in r.iter_bytes(chunk_size=1024 * 1024):
+                f.write(chunk)
+    log(f"  downloaded {src.stat().st_size:,} bytes")
+
+    dst = src.with_name(src.stem + ".reels.mp4")
+    log("Re-encoding to Reels spec (H.264 high@4.0, 4.5/5 Mbps, AAC 128k/48k, faststart)")
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-i", str(src),
+            "-c:v", "libx264", "-profile:v", "high", "-level", "4.0", "-preset", "veryfast",
+            "-b:v", "4500k", "-maxrate", "5000k", "-bufsize", "10000k",
+            "-c:a", "aac", "-b:a", "128k", "-ar", "48000",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+            str(dst),
+        ],
+        check=True,
+    )
+    src.unlink(missing_ok=True)
+    log(f"  re-encoded: {dst.stat().st_size:,} bytes")
+    return dst
+
+
+def initiate_reel_resumable(client: httpx.Client, caption: str) -> tuple[str, str]:
+    r = client.post(
+        f"{GRAPH}/{IG_USER}/media",
+        data={
+            "media_type": "REELS",
+            "upload_type": "resumable",
+            "caption": caption,
+            "share_to_feed": "true",
+            "access_token": META_TOKEN,
+        },
+        timeout=60,
+    )
+    r.raise_for_status()
+    body = r.json()
+    return body["id"], body["uri"]
+
+
+def upload_reel_bytes(client: httpx.Client, upload_uri: str, file_path: Path) -> None:
+    size = file_path.stat().st_size
+    log(f"Uploading {size:,} bytes to Meta resumable endpoint")
+    with file_path.open("rb") as f:
+        r = client.post(
+            upload_uri,
+            headers={
+                "Authorization": f"OAuth {META_TOKEN}",
+                "offset": "0",
+                "file_size": str(size),
+                "Content-Type": "application/octet-stream",
+            },
+            content=f.read(),
+            timeout=600,
+        )
+    r.raise_for_status()
+    log(f"  upload response: {r.json()}")
+
+
+def post_video_ig(client: httpx.Client, file_path: Path, caption: str, max_attempts: int = 2) -> str:
     last_err: Exception | None = None
     for attempt in range(1, max_attempts + 1):
-        log(f"Creating IG REELS container (attempt {attempt}/{max_attempts}) for {target['video_url']}")
-        r = client.post(
-            f"{GRAPH}/{IG_USER}/media",
-            data={
-                "media_type": "REELS",
-                "video_url": target["video_url"],
-                "caption": caption,
-                "share_to_feed": "true",
-                "access_token": META_TOKEN,
-            },
-            timeout=120,
-        )
-        r.raise_for_status()
-        cid = r.json()["id"]
-        log(f"  container_id={cid}, polling...")
+        log(f"Initiating IG REELS resumable upload (attempt {attempt}/{max_attempts})")
+        cid, upload_uri = initiate_reel_resumable(client, caption)
+        log(f"  container_id={cid}")
         try:
+            upload_reel_bytes(client, upload_uri, file_path)
             wait_container(client, cid, timeout=300)
-        except RuntimeError as e:
+        except (RuntimeError, httpx.HTTPError) as e:
             log(f"  attempt {attempt} failed: {e}")
             last_err = e
             if attempt < max_attempts:
@@ -236,22 +303,28 @@ def main() -> int:
             log("DRY_RUN=1 — skipping actual posts")
             return 0
 
-        if target.get("media_type") == "CAROUSEL":
-            ig_id = post_carousel_ig(client, target, caption)
-        else:
-            ig_id = post_video_ig(client, target, caption)
-
-        product_ids = [p["ig_product_id"] for p in target["products"] if p.get("ig_product_id")]
+        local_video: Path | None = None
         try:
-            tag_products(client, ig_id, product_ids)
-        except Exception as e:
-            log(f"  Tag application failed (post still up): {e}")
+            if target.get("media_type") == "CAROUSEL":
+                ig_id = post_carousel_ig(client, target, caption)
+            else:
+                local_video = prepare_reel(client, target["video_url"])
+                ig_id = post_video_ig(client, local_video, caption)
 
-        try:
-            fb_id = post_fb(client, target, caption)
-        except Exception as e:
-            log(f"  FB post failed (IG already up): {e}")
-            fb_id = ""
+            product_ids = [p["ig_product_id"] for p in target["products"] if p.get("ig_product_id")]
+            try:
+                tag_products(client, ig_id, product_ids)
+            except Exception as e:
+                log(f"  Tag application failed (post still up): {e}")
+
+            try:
+                fb_id = post_fb(client, target, caption)
+            except Exception as e:
+                log(f"  FB post failed (IG already up): {e}")
+                fb_id = ""
+        finally:
+            if local_video is not None:
+                local_video.unlink(missing_ok=True)
 
     posted_state["posted"].insert(0, {
         "batch": target["batch"],
